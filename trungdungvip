@@ -1,0 +1,933 @@
+// ============================================================
+// NSMODJerryUI.m
+// Giao diện kiểu JerryMod - Full featured Bone Editor
+// ============================================================
+
+#import <UIKit/UIKit.h>
+#import <Foundation/Foundation.h>
+#import <QuartzCore/QuartzCore.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+
+// ===== CẤU HÌNH =====
+#define kTargetFile    @"assetindexer.U6Zffc4YIR3DslNj3cXvYGAqz58=3D"
+#define kCfgPath       @"/var/mobile/Library/Preferences/com.nsmod.jerry.plist"
+#define kWorkDir       @"/var/mobile/Documents/NSMODJerry/"
+
+// ===== MÀU SẮC JERRY STYLE =====
+#define kGreen       [UIColor colorWithRed:0.13 green:0.99 blue:0.53 alpha:1.0]
+#define kGreenDim    [UIColor colorWithRed:0.13 green:0.99 blue:0.53 alpha:0.15]
+#define kBg          [UIColor colorWithRed:0.02 green:0.03 blue:0.05 alpha:1.0]
+#define kCard        [UIColor colorWithRed:0.06 green:0.08 blue:0.10 alpha:1.0]
+#define kCardBorder  [UIColor colorWithRed:0.13 green:0.99 blue:0.53 alpha:0.35]
+#define kText        [UIColor colorWithWhite:0.95 alpha:1.0]
+#define kTextDim     [UIColor colorWithWhite:0.50 alpha:1.0]
+#define kRed         [UIColor colorWithRed:1.00 green:0.30 blue:0.30 alpha:1.0]
+#define kOrange      [UIColor colorWithRed:1.00 green:0.60 blue:0.15 alpha:1.0]
+#define kCyan        [UIColor colorWithRed:0.20 green:0.85 blue:1.00 alpha:1.0]
+#define kPurple      [UIColor colorWithRed:0.70 green:0.35 blue:0.95 alpha:1.0]
+
+// ===== DANH SÁCH BONE =====
+static NSArray *kBoneList = nil;
+static void initBoneList(void) {
+    if (kBoneList) return;
+    kBoneList = @[
+        @"bone_Root", @"bone_Hips", @"bone_Spine", @"bone_Spine1",
+        @"bone_Neck", @"bone_Head",
+        @"bone_LeftClav", @"bone_LeftArm", @"bone_LeftForeArm", @"bone_LeftHand",
+        @"bone_RightClav", @"bone_RightArm", @"bone_RightForeArm", @"bone_RightHand",
+        @"bone_LeftLegUpper", @"bone_LeftLeg", @"bone_LeftAnkle", @"bone_LeftToe",
+        @"bone_RightLegUpper", @"bone_RightLeg", @"bone_RightAnkle", @"bone_RightToe",
+        @"bone_Left_Finger01", @"bone_Left_Finger02",
+        @"bone_Left_Finger11", @"bone_Left_Finger12",
+        @"bone_Left_Finger21", @"bone_Left_Finger22",
+        @"bone_Left_Finger31", @"bone_Left_Finger32",
+        @"bone_Left_Finger41", @"bone_Left_Finger42",
+        @"bone_Right_Finger01", @"bone_Right_Finger02",
+        @"bone_Right_Finger11", @"bone_Right_Finger12",
+        @"bone_Right_Finger21", @"bone_Right_Finger22",
+        @"bone_Right_Finger31", @"bone_Right_Finger32",
+        @"bone_Right_Finger41", @"bone_Right_Finger42",
+        @"Bip01 L ForeTwist", @"Bip01 L ForeTwist1",
+        @"Bip01 R ForeTwist", @"Bip01 R ForeTwist1",
+        @"bone_Left_Weapon", @"bone_Right_Weapon",
+        @"bone_Left_Spine_Backpack", @"bone_Left_Spine_Weapon", @"bone_Right_Spine_Weapon",
+        @"bone_Hips_Dummy"
+    ];
+}
+
+// ===== STATE =====
+static NSMutableDictionary *gCfg = nil;
+static NSString *gLoadedFile = nil;
+
+static NSMutableDictionary *boneCfg(int idx) {
+    NSString *k = [NSString stringWithFormat:@"b%d", idx];
+    NSMutableDictionary *d = gCfg[k];
+    if (!d) {
+        d = [@{@"sx":@1.0,@"sy":@1.0,@"sz":@1.0,
+               @"ox":@0.0,@"oy":@0.0,@"oz":@0.0,
+               @"rx":@0.0,@"ry":@0.0,@"rz":@0.0,
+               @"swapX":@(-1),@"swapY":@(-1),@"swapZ":@(-1)} mutableCopy];
+        gCfg[k] = d;
+    }
+    return d;
+}
+
+// ============================================================
+// CARD VIEW - khung bo góc Jerry style
+// ============================================================
+@interface NSMODCard : UIView
+@end
+@implementation NSMODCard
+- (instancetype)initWithFrame:(CGRect)f {
+    self = [super initWithFrame:f];
+    if (self) {
+        self.backgroundColor = kCard;
+        self.layer.cornerRadius = 14;
+        self.layer.borderWidth = 1;
+        self.layer.borderColor = kCardBorder.CGColor;
+    }
+    return self;
+}
+@end
+
+// ============================================================
+// BONE ROW CELL - mỗi xương 1 hàng có nút mở editor
+// ============================================================
+@interface NSMODBoneRow : UITableViewCell
+@property (nonatomic, strong) UILabel *nameLbl;
+@property (nonatomic, strong) UILabel *valLbl;
+@property (nonatomic, strong) UIButton *editBtn;
+@property (nonatomic, assign) int boneIdx;
+@end
+
+@implementation NSMODBoneRow
+
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)rid {
+    self = [super initWithStyle:style reuseIdentifier:rid];
+    if (self) {
+        self.backgroundColor = kCard;
+        self.selectionStyle = UITableViewCellSelectionStyleNone;
+        
+        self.nameLbl = [[UILabel alloc] init];
+        self.nameLbl.font = [UIFont fontWithName:@"Menlo-Bold" size:12] ?: [UIFont boldSystemFontOfSize:12];
+        self.nameLbl.textColor = kText;
+        self.nameLbl.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.contentView addSubview:self.nameLbl];
+        
+        self.valLbl = [[UILabel alloc] init];
+        self.valLbl.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
+        self.valLbl.textColor = kGreen;
+        self.valLbl.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.contentView addSubview:self.valLbl];
+        
+        self.editBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        [self.editBtn setTitle:@"CHỈNH" forState:UIControlStateNormal];
+        [self.editBtn setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
+        self.editBtn.backgroundColor = kGreen;
+        self.editBtn.titleLabel.font = [UIFont boldSystemFontOfSize:11];
+        self.editBtn.layer.cornerRadius = 8;
+        self.editBtn.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.contentView addSubview:self.editBtn];
+        
+        [NSLayoutConstraint activateConstraints:@[
+            [self.nameLbl.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14],
+            [self.nameLbl.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:12],
+            
+            [self.valLbl.leadingAnchor constraintEqualToAnchor:self.nameLbl.leadingAnchor],
+            [self.valLbl.topAnchor constraintEqualToAnchor:self.nameLbl.bottomAnchor constant:4],
+            
+            [self.editBtn.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-14],
+            [self.editBtn.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+            [self.editBtn.widthAnchor constraintEqualToConstant:70],
+            [self.editBtn.heightAnchor constraintEqualToConstant:32],
+        ]];
+    }
+    return self;
+}
+
+- (void)setBoneIdx:(int)boneIdx {
+    _boneIdx = boneIdx;
+    self.nameLbl.text = kBoneList[boneIdx];
+    NSDictionary *c = boneCfg(boneIdx);
+    self.valLbl.text = [NSString stringWithFormat:@"S:%.2f,%.2f,%.2f  O:%.1f,%.1f,%.1f",
+        [c[@"sx"] floatValue],[c[@"sy"] floatValue],[c[@"sz"] floatValue],
+        [c[@"ox"] floatValue],[c[@"oy"] floatValue],[c[@"oz"] floatValue]];
+}
+@end
+
+// ============================================================
+// BONE EDITOR - Chi tiết từng xương
+// ============================================================
+@interface NSMODBoneDetail : UIViewController
+@property (nonatomic, assign) int boneIdx;
+@property (nonatomic, strong) UIScrollView *scroll;
+@end
+
+@implementation NSMODBoneDetail
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.view.backgroundColor = kBg;
+    self.title = kBoneList[self.boneIdx];
+    
+    self.scroll = [[UIScrollView alloc] initWithFrame:self.view.bounds];
+    self.scroll.contentSize = CGSizeMake(self.view.bounds.size.width, 1100);
+    [self.view addSubview:self.scroll];
+    
+    CGFloat W = self.view.bounds.size.width;
+    CGFloat y = 20;
+    
+    NSDictionary *c = boneCfg(self.boneIdx);
+    
+    // ===== SCALE XYZ =====
+    NSMODCard *scaleCard = [[NSMODCard alloc] initWithFrame:CGRectMake(12, y, W-24, 210)];
+    [self.scroll addSubview:scaleCard];
+    
+    UILabel *sTitle = [[UILabel alloc] initWithFrame:CGRectMake(14, 10, 200, 22)];
+    sTitle.text = @"📏 SCALE XYZ";
+    sTitle.textColor = kGreen;
+    sTitle.font = [UIFont boldSystemFontOfSize:13];
+    [scaleCard addSubview:sTitle];
+    
+    [self addSliderTo:scaleCard y:40 key:@"sx" label:@"X" color:kRed   value:[c[@"sx"] floatValue]];
+    [self addSliderTo:scaleCard y:85 key:@"sy" label:@"Y" color:kGreen value:[c[@"sy"] floatValue]];
+    [self addSliderTo:scaleCard y:130 key:@"sz" label:@"Z" color:kCyan value:[c[@"sz"] floatValue]];
+    
+    y += 225;
+    
+    // ===== OFFSET XYZ =====
+    NSMODCard *offCard = [[NSMODCard alloc] initWithFrame:CGRectMake(12, y, W-24, 210)];
+    [self.scroll addSubview:offCard];
+    
+    UILabel *oTitle = [[UILabel alloc] initWithFrame:CGRectMake(14, 10, 200, 22)];
+    oTitle.text = @"➡️ OFFSET XYZ";
+    oTitle.textColor = kGreen;
+    oTitle.font = [UIFont boldSystemFontOfSize:13];
+    [offCard addSubview:oTitle];
+    
+    [self addSliderTo:offCard y:40 key:@"ox" label:@"X" color:kRed   value:[c[@"ox"] floatValue]];
+    [self addSliderTo:offCard y:85 key:@"oy" label:@"Y" color:kGreen value:[c[@"oy"] floatValue]];
+    [self addSliderTo:offCard y:130 key:@"oz" label:@"Z" color:kCyan value:[c[@"oz"] floatValue]];
+    
+    y += 225;
+    
+    // ===== ROTATE XYZ =====
+    NSMODCard *rotCard = [[NSMODCard alloc] initWithFrame:CGRectMake(12, y, W-24, 210)];
+    [self.scroll addSubview:rotCard];
+    
+    UILabel *rTitle = [[UILabel alloc] initWithFrame:CGRectMake(14, 10, 200, 22)];
+    rTitle.text = @"🔄 ROTATE XYZ (độ)";
+    rTitle.textColor = kGreen;
+    rTitle.font = [UIFont boldSystemFontOfSize:13];
+    [rotCard addSubview:rTitle];
+    
+    [self addSliderTo:rotCard y:40 key:@"rx" label:@"X" color:kRed   value:[c[@"rx"] floatValue]];
+    [self addSliderTo:rotCard y:85 key:@"ry" label:@"Y" color:kGreen value:[c[@"ry"] floatValue]];
+    [self addSliderTo:rotCard y:130 key:@"rz" label:@"Z" color:kCyan value:[c[@"rz"] floatValue]];
+    
+    y += 225;
+    
+    // ===== HOÁN ĐỔI VỊ TRÍ XƯƠNG =====
+    NSMODCard *swapCard = [[NSMODCard alloc] initWithFrame:CGRectMake(12, y, W-24, 250)];
+    [self.scroll addSubview:swapCard];
+    
+    UILabel *swTitle = [[UILabel alloc] initWithFrame:CGRectMake(14, 10, 250, 22)];
+    swTitle.text = @"🔀 HOÁN ĐỔI VỊ TRÍ VỚI XƯƠNG";
+    swTitle.textColor = kOrange;
+    swTitle.font = [UIFont boldSystemFontOfSize:13];
+    [swapCard addSubview:swTitle];
+    
+    NSArray *axisNames = @[@"X", @"Y", @"Z"];
+    NSArray *axisKeys = @[@"swapX", @"swapY", @"swapZ"];
+    NSArray *axisColors = @[kRed, kGreen, kCyan];
+    
+    for (int i = 0; i < 3; i++) {
+        CGFloat ay = 40 + i * 68;
+        
+        UILabel *axL = [[UILabel alloc] initWithFrame:CGRectMake(14, ay, 30, 24)];
+        axL.text = axisNames[i];
+        axL.textColor = axisColors[i];
+        axL.font = [UIFont boldSystemFontOfSize:15];
+        [swapCard addSubview:axL];
+        
+        // Button chọn bone để swap
+        UIButton *bBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        bBtn.frame = CGRectMake(50, ay, W-24-64, 28);
+        int swapIdx = [c[axisKeys[i]] intValue];
+        NSString *bTitle = swapIdx < 0 ? @"▸ CHỌN XƯƠNG ĐỂ HOÁN ĐỔI" :
+                           [NSString stringWithFormat:@"⇄ %@", kBoneList[swapIdx]];
+        [bBtn setTitle:bTitle forState:UIControlStateNormal];
+        [bBtn setTitleColor:swapIdx < 0 ? kTextDim : kOrange forState:UIControlStateNormal];
+        bBtn.backgroundColor = kBg;
+        bBtn.titleLabel.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
+        bBtn.layer.cornerRadius = 6;
+        bBtn.layer.borderWidth = 1;
+        bBtn.layer.borderColor = swapIdx < 0 ? kCardBorder.CGColor : kOrange.CGColor;
+        bBtn.tag = 5000 + i;
+        [bBtn addTarget:self action:@selector(pickSwapBone:) forControlEvents:UIControlEventTouchUpInside];
+        [swapCard addSubview:bBtn];
+    }
+    
+    y += 265;
+    
+    // Nút Reset
+    UIButton *rst = [UIButton buttonWithType:UIButtonTypeSystem];
+    rst.frame = CGRectMake(12, y, W-24, 44);
+    [rst setTitle:@"🔄 RESET XƯƠNG NÀY" forState:UIControlStateNormal];
+    [rst setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
+    rst.backgroundColor = kOrange;
+    rst.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    rst.layer.cornerRadius = 10;
+    [rst addTarget:self action:@selector(resetThis) forControlEvents:UIControlEventTouchUpInside];
+    [self.scroll addSubview:rst];
+    
+    y += 60;
+    self.scroll.contentSize = CGSizeMake(W, y + 40);
+}
+
+- (void)addSliderTo:(UIView*)parent y:(CGFloat)y key:(NSString*)key label:(NSString*)label color:(UIColor*)color value:(float)v {
+    CGFloat W = parent.frame.size.width;
+    
+    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(14, y, 30, 20)];
+    l.text = label;
+    l.textColor = color;
+    l.font = [UIFont boldSystemFontOfSize:14];
+    [parent addSubview:l];
+    
+    UILabel *val = [[UILabel alloc] initWithFrame:CGRectMake(W-80, y, 66, 20)];
+    val.text = [NSString stringWithFormat:@"%.2f", v];
+    val.textColor = color;
+    val.font = [UIFont fontWithName:@"Menlo-Bold" size:12] ?: [UIFont boldSystemFontOfSize:12];
+    val.textAlignment = NSTextAlignmentRight;
+    val.tag = [self tagForKey:key];
+    [parent addSubview:val];
+    
+    UISlider *s = [[UISlider alloc] initWithFrame:CGRectMake(50, y, W-140, 24)];
+    BOOL isRotate = [key hasPrefix:@"r"];
+    BOOL isOffset = [key hasPrefix:@"o"];
+    if (isRotate) {
+        s.minimumValue = -180.0f; s.maximumValue = 180.0f;
+    } else if (isOffset) {
+        s.minimumValue = -2.0f; s.maximumValue = 2.0f;
+    } else {
+        s.minimumValue = 0.1f; s.maximumValue = 5.0f;
+    }
+    s.value = v;
+    s.minimumTrackTintColor = color;
+    s.maximumTrackTintColor = [UIColor colorWithWhite:0.15 alpha:1];
+    s.thumbTintColor = color;
+    s.tag = [self sliderTagForKey:key];
+    [s addTarget:self action:@selector(sliderChanged:) forControlEvents:UIControlEventValueChanged];
+    [parent addSubview:s];
+}
+
+- (int)tagForKey:(NSString*)k {
+    if ([k isEqual:@"sx"]) return 1001;
+    if ([k isEqual:@"sy"]) return 1002;
+    if ([k isEqual:@"sz"]) return 1003;
+    if ([k isEqual:@"ox"]) return 1004;
+    if ([k isEqual:@"oy"]) return 1005;
+    if ([k isEqual:@"oz"]) return 1006;
+    if ([k isEqual:@"rx"]) return 1007;
+    if ([k isEqual:@"ry"]) return 1008;
+    if ([k isEqual:@"rz"]) return 1009;
+    return 0;
+}
+- (int)sliderTagForKey:(NSString*)k {
+    return [self tagForKey:k] - 1000;
+}
+- (NSString*)keyForSliderTag:(int)t {
+    NSArray *keys = @[@"sx",@"sy",@"sz",@"ox",@"oy",@"oz",@"rx",@"ry",@"rz"];
+    if (t < 0 || t >= keys.count) return @"";
+    return keys[t];
+}
+
+- (void)sliderChanged:(UISlider*)s {
+    NSString *key = [self keyForSliderTag:(int)s.tag];
+    if (key.length == 0) return;
+    NSMutableDictionary *c = boneCfg(self.boneIdx);
+    c[key] = @(s.value);
+    UILabel *val = [self.view viewWithTag:[self tagForKey:key]];
+    if (!val) {
+        for (UIView *v in self.scroll.subviews) {
+            UIView *found = [v viewWithTag:[self tagForKey:key]];
+            if (found) { val = (UILabel*)found; break; }
+        }
+    }
+    val.text = [NSString stringWithFormat:@"%.2f", s.value];
+}
+
+- (void)pickSwapBone:(UIButton*)b {
+    int axis = (int)b.tag - 5000;
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Chọn xương để hoán đổi"
+        message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    NSMutableDictionary *c = boneCfg(self.boneIdx);
+    [ac addAction:[UIAlertAction actionWithTitle:@"❌ BỎ HOÁN ĐỔI" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a){
+        c[axis==0?@"swapX":(axis==1?@"swapY":@"swapZ")] = @(-1);
+        [self reloadButtons];
+    }]];
+    for (int i = 0; i < kBoneList.count; i++) {
+        if (i == self.boneIdx) continue;
+        NSString *t = kBoneList[i];
+        [ac addAction:[UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+            c[axis==0?@"swapX":(axis==1?@"swapY":@"swapZ")] = @(i);
+            [self reloadButtons];
+        }]];
+    }
+    ac.popoverPresentationController.sourceView = b;
+    ac.popoverPresentationController.sourceRect = b.bounds;
+    [self presentViewController:ac animated:YES completion:nil];
+}
+
+- (void)reloadButtons {
+    NSMutableDictionary *c = boneCfg(self.boneIdx);
+    NSArray *keys = @[@"swapX", @"swapY", @"swapZ"];
+    CGFloat W = self.view.bounds.size.width;
+    for (int i = 0; i < 3; i++) {
+        UIButton *b = [self.view viewWithTag:5000 + i];
+        if (!b) {
+            for (UIView *v in self.scroll.subviews) {
+                UIView *f = [v viewWithTag:5000 + i];
+                if (f) { b = (UIButton*)f; break; }
+            }
+        }
+        if (!b) continue;
+        int swapIdx = [c[keys[i]] intValue];
+        NSString *bTitle = swapIdx < 0 ? @"▸ CHỌN XƯƠNG ĐỂ HOÁN ĐỔI" :
+                           [NSString stringWithFormat:@"⇄ %@", kBoneList[swapIdx]];
+        [b setTitle:bTitle forState:UIControlStateNormal];
+        [b setTitleColor:swapIdx < 0 ? kTextDim : kOrange forState:UIControlStateNormal];
+        b.layer.borderColor = swapIdx < 0 ? kCardBorder.CGColor : kOrange.CGColor;
+    }
+}
+
+- (void)resetThis {
+    gCfg[[NSString stringWithFormat:@"b%d", self.boneIdx]] =
+        [@{@"sx":@1.0,@"sy":@1.0,@"sz":@1.0,
+           @"ox":@0.0,@"oy":@0.0,@"oz":@0.0,
+           @"rx":@0.0,@"ry":@0.0,@"rz":@0.0,
+           @"swapX":@(-1),@"swapY":@(-1),@"swapZ":@(-1)} mutableCopy];
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+@end
+
+// ============================================================
+// MAIN VIEW CONTROLLER - Jerry style
+// ============================================================
+@interface NSMODJerryVC : UIViewController <UITableViewDelegate, UITableViewDataSource, UIDocumentPickerDelegate, UISearchBarDelegate>
+@property (nonatomic, strong) UIScrollView *mainScroll;
+@property (nonatomic, strong) UITableView *boneTable;
+@property (nonatomic, strong) UILabel *fileLbl;
+@property (nonatomic, strong) UILabel *statusLbl;
+@property (nonatomic, strong) UISearchBar *search;
+@property (nonatomic, strong) NSMutableArray *filtered;
+@property (nonatomic, strong) NSMutableArray *filteredIdx;
+@property (nonatomic, strong) UISwitch *masterSwitch;
+@property (nonatomic, strong) UILabel *globalValLbl;
+@property (nonatomic, strong) UISlider *globalSlider;
+@end
+
+@implementation NSMODJerryVC
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    initBoneList();
+    if (!gCfg) gCfg = [NSMutableDictionary dictionary];
+    self.view.backgroundColor = kBg;
+    
+    self.mainScroll = [[UIScrollView alloc] initWithFrame:self.view.bounds];
+    self.mainScroll.contentSize = CGSizeMake(self.view.bounds.size.width, 1400);
+    self.mainScroll.backgroundColor = kBg;
+    [self.view addSubview:self.mainScroll];
+    
+    [self buildTopBar];
+    [self buildLoadCard];
+    [self buildConfigCard];
+    [self buildBoneList];
+    
+    // Nút đóng
+    UIBarButtonItem *close = [[UIBarButtonItem alloc] initWithTitle:@"✕"
+        style:UIBarButtonItemStyleDone target:self action:@selector(dismiss)];
+    self.navigationItem.rightBarButtonItem = close;
+    self.navigationController.navigationBar.barStyle = UIBarStyleBlack;
+    self.navigationController.navigationBar.tintColor = kGreen;
+    self.navigationController.navigationBar.titleTextAttributes = @{NSForegroundColorAttributeName: kText};
+    
+    [self applyFilter:@""];
+    [self updateFileLbl];
+}
+
+- (void)buildTopBar {
+    CGFloat W = self.view.bounds.size.width;
+    UIView *top = [[UIView alloc] initWithFrame:CGRectMake(0, 0, W, 70)];
+    top.backgroundColor = kBg;
+    [self.mainScroll addSubview:top];
+    
+    UILabel *logo = [[UILabel alloc] initWithFrame:CGRectMake(16, 14, 200, 28)];
+    logo.text = @"NSMOD";
+    logo.textColor = kGreen;
+    logo.font = [UIFont boldSystemFontOfSize:24];
+    [top addSubview:logo];
+    
+    UILabel *sub = [[UILabel alloc] initWithFrame:CGRectMake(16, 42, 260, 16)];
+    sub.text = @"● Đã kích hoạt (VIP)";
+    sub.textColor = kGreen;
+    sub.font = [UIFont systemFontOfSize:11];
+    [top addSubview:sub];
+    
+    // Badge VIP
+    UILabel *badge = [[UILabel alloc] initWithFrame:CGRectMake(W-130, 20, 114, 30)];
+    badge.text = @"✓ LICENSED";
+    badge.textColor = kGreen;
+    badge.font = [UIFont boldSystemFontOfSize:12];
+    badge.textAlignment = NSTextAlignmentCenter;
+    badge.layer.cornerRadius = 15;
+    badge.layer.borderWidth = 1.5;
+    badge.layer.borderColor = kGreen.CGColor;
+    badge.backgroundColor = kGreenDim;
+    badge.layer.masksToBounds = YES;
+    [top addSubview:badge];
+}
+
+- (void)buildLoadCard {
+    CGFloat W = self.view.bounds.size.width;
+    CGFloat y = 82;
+    
+    NSMODCard *card = [[NSMODCard alloc] initWithFrame:CGRectMake(12, y, W-24, 200)];
+    [self.mainScroll addSubview:card];
+    
+    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(16, 12, 300, 24)];
+    title.text = @"📁 NẠP FILE CẤU HÌNH";
+    title.textColor = kGreen;
+    title.font = [UIFont boldSystemFontOfSize:14];
+    [card addSubview:title];
+    
+    // Khung drop-zone
+    UIView *dropZone = [[UIView alloc] initWithFrame:CGRectMake(16, 46, W-56, 130)];
+    dropZone.backgroundColor = kBg;
+    dropZone.layer.cornerRadius = 12;
+    dropZone.layer.borderWidth = 1.5;
+    dropZone.layer.borderColor = kGreen.CGColor;
+    dropZone.layer.borderDashPattern = @[@6, @4];
+    dropZone.layer.masksToBounds = YES;
+    dropZone.userInteractionEnabled = YES;
+    [card addSubview:dropZone];
+    
+    // Icon folder
+    UIImageView *icon = [[UIImageView alloc] initWithFrame:CGRectMake((dropZone.frame.size.width-50)/2, 16, 50, 50)];
+    icon.image = [UIImage systemImageNamed:@"folder.badge.plus"];
+    icon.tintColor = kGreen;
+    icon.contentMode = UIViewContentModeScaleAspectFit;
+    [dropZone addSubview:icon];
+    
+    UILabel *l1 = [[UILabel alloc] initWithFrame:CGRectMake(0, 74, dropZone.frame.size.width, 22)];
+    l1.text = @"Chọn file dữ liệu cần Make";
+    l1.textColor = kText;
+    l1.font = [UIFont boldSystemFontOfSize:14];
+    l1.textAlignment = NSTextAlignmentCenter;
+    [dropZone addSubview:l1];
+    
+    UILabel *l2 = [[UILabel alloc] initWithFrame:CGRectMake(0, 96, dropZone.frame.size.width, 18)];
+    l2.text = @"HỆ THỐNG MAKE FILE TỰ ĐỘNG NSMOD";
+    l2.textColor = kTextDim;
+    l2.font = [UIFont systemFontOfSize:10];
+    l2.textAlignment = NSTextAlignmentCenter;
+    [dropZone addSubview:l2];
+    
+    // Nhãn file
+    self.fileLbl = [[UILabel alloc] initWithFrame:CGRectMake(16, 178, W-56, 16)];
+    self.fileLbl.text = @"Chưa chọn file";
+    self.fileLbl.textColor = kTextDim;
+    self.fileLbl.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
+    self.fileLbl.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    [card addSubview:self.fileLbl];
+    
+    // Tap để chọn file
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(openFilePicker)];
+    [dropZone addGestureRecognizer:tap];
+}
+
+- (void)buildConfigCard {
+    CGFloat W = self.view.bounds.size.width;
+    CGFloat y = 296;
+    
+    NSMODCard *card = [[NSMODCard alloc] initWithFrame:CGRectMake(12, y, W-24, 160)];
+    [self.mainScroll addSubview:card];
+    
+    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(16, 12, 300, 24)];
+    title.text = @"⚙️ CẤU HÌNH ĐỂ MAKE";
+    title.textColor = kGreen;
+    title.font = [UIFont boldSystemFontOfSize:14];
+    [card addSubview:title];
+    
+    // Switch tổng
+    self.masterSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(W-24-70, 12, 51, 31)];
+    self.masterSwitch.onTintColor = kGreen;
+    self.masterSwitch.on = [gCfg[@"enable"] boolValue];
+    [self.masterSwitch addTarget:self action:@selector(toggleMaster:) forControlEvents:UIControlEventValueChanged];
+    [card addSubview:self.masterSwitch];
+    
+    // Global scale
+    UILabel *gl = [[UILabel alloc] initWithFrame:CGRectMake(16, 56, 200, 20)];
+    gl.text = @"GLOBAL SCALE (toàn thân)";
+    gl.textColor = kText;
+    gl.font = [UIFont boldSystemFontOfSize:12];
+    [card addSubview:gl];
+    
+    self.globalValLbl = [[UILabel alloc] initWithFrame:CGRectMake(W-24-90, 56, 74, 20)];
+    float gs = [gCfg[@"globalScale"] floatValue] ?: 1.0f;
+    self.globalValLbl.text = [NSString stringWithFormat:@"%.2f", gs];
+    self.globalValLbl.textColor = kGreen;
+    self.globalValLbl.font = [UIFont fontWithName:@"Menlo-Bold" size:14] ?: [UIFont boldSystemFontOfSize:14];
+    self.globalValLbl.textAlignment = NSTextAlignmentRight;
+    [card addSubview:self.globalValLbl];
+    
+    self.globalSlider = [[UISlider alloc] initWithFrame:CGRectMake(16, 82, W-56, 28)];
+    self.globalSlider.minimumValue = 0.3f;
+    self.globalSlider.maximumValue = 3.0f;
+    self.globalSlider.value = gs;
+    self.globalSlider.minimumTrackTintColor = kGreen;
+    self.globalSlider.maximumTrackTintColor = [UIColor colorWithWhite:0.15 alpha:1];
+    self.globalSlider.thumbTintColor = kGreen;
+    [self.globalSlider addTarget:self action:@selector(globalChanged:) forControlEvents:UIControlEventValueChanged];
+    [card addSubview:self.globalSlider];
+    
+    // Nút Lưu
+    UIButton *save = [UIButton buttonWithType:UIButtonTypeSystem];
+    save.frame = CGRectMake(16, 118, W-56, 34);
+    [save setTitle:@"💾 LƯU CẤU HÌNH" forState:UIControlStateNormal];
+    [save setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
+    save.backgroundColor = kGreen;
+    save.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    save.layer.cornerRadius = 10;
+    [save addTarget:self action:@selector(saveConfig) forControlEvents:UIControlEventTouchUpInside];
+    [card addSubview:save];
+}
+
+- (void)buildBoneList {
+    CGFloat W = self.view.bounds.size.width;
+    CGFloat y = 468;
+    
+    // Thanh tìm kiếm
+    self.search = [[UISearchBar alloc] initWithFrame:CGRectMake(0, y, W, 44)];
+    self.search.placeholder = @"🔍 Tìm xương...";
+    self.search.delegate = self;
+    self.search.searchBarStyle = UISearchBarStyleMinimal;
+    self.search.tintColor = kGreen;
+    UITextField *tf = [self.search valueForKey:@"searchField"];
+    if (tf) {
+        tf.textColor = kText;
+        tf.backgroundColor = kCard;
+        tf.layer.cornerRadius = 10;
+    }
+    [self.mainScroll addSubview:self.search];
+    
+    y += 50;
+    
+    // Header danh sách
+    UILabel *lh = [[UILabel alloc] initWithFrame:CGRectMake(16, y, 300, 22)];
+    lh.text = @"🦴 DANH SÁCH XƯƠNG";
+    lh.textColor = kGreen;
+    lh.font = [UIFont boldSystemFontOfSize:13];
+    [self.mainScroll addSubview:lh];
+    
+    y += 30;
+    
+    // Table bone
+    CGFloat tableH = 700;
+    self.boneTable = [[UITableView alloc] initWithFrame:CGRectMake(12, y, W-24, tableH)
+                                                 style:UITableViewStylePlain];
+    self.boneTable.backgroundColor = kCard;
+    self.boneTable.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
+    self.boneTable.separatorColor = kCardBorder;
+    self.boneTable.layer.cornerRadius = 14;
+    self.boneTable.layer.borderWidth = 1;
+    self.boneTable.layer.borderColor = kCardBorder.CGColor;
+    self.boneTable.layer.masksToBounds = YES;
+    self.boneTable.delegate = self;
+    self.boneTable.dataSource = self;
+    self.boneTable.rowHeight = 62;
+    self.boneTable.scrollEnabled = NO;
+    [self.boneTable registerClass:[NSMODBoneRow class] forCellReuseIdentifier:@"bone"];
+    [self.mainScroll addSubview:self.boneTable];
+    
+    // Status label
+    self.statusLbl = [[UILabel alloc] initWithFrame:CGRectMake(0, y + tableH + 12, W, 20)];
+    self.statusLbl.text = @"MADE BY NSMOD";
+    self.statusLbl.textColor = kTextDim;
+    self.statusLbl.font = [UIFont systemFontOfSize:11];
+    self.statusLbl.textAlignment = NSTextAlignmentCenter;
+    [self.mainScroll addSubview:self.statusLbl];
+    
+    self.mainScroll.contentSize = CGSizeMake(W, y + tableH + 60);
+}
+
+- (void)updateFileLbl {
+    if (gLoadedFile) {
+        self.fileLbl.text = [NSString stringWithFormat:@"📄 %@", gLoadedFile.lastPathComponent];
+        self.fileLbl.textColor = kGreen;
+    } else {
+        self.fileLbl.text = @"Chưa chọn file";
+        self.fileLbl.textColor = kTextDim;
+    }
+}
+
+// ===== CHỌN FILE =====
+- (void)openFilePicker {
+    if (@available(iOS 14.0, *)) {
+        UIDocumentPickerViewController *p = [[UIDocumentPickerViewController alloc]
+            initForOpeningContentTypes:@[UTTypeData, UTTypeItem] asCopy:YES];
+        p.delegate = self;
+        p.allowsMultipleSelection = NO;
+        [self presentViewController:p animated:YES completion:nil];
+    } else {
+        UIDocumentPickerViewController *p = [[UIDocumentPickerViewController alloc]
+            initWithDocumentTypes:@[@"public.data"] inMode:UIDocumentPickerModeImport];
+        p.delegate = self;
+        [self presentViewController:p animated:YES completion:nil];
+    }
+}
+
+- (void)documentPicker:(UIDocumentPickerViewController *)c didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    if (!urls.count) return;
+    NSURL *src = urls.firstObject;
+    NSString *name = src.lastPathComponent;
+    if (![name containsString:@"assetindexer"]) {
+        [self showStatus:@"⚠️ File không đúng định dạng!" color:kRed];
+        return;
+    }
+    [[NSFileManager defaultManager] createDirectoryAtPath:kWorkDir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *dest = [kWorkDir stringByAppendingPathComponent:kTargetFile];
+    [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
+    NSError *e = nil;
+    if (![[NSFileManager defaultManager] copyItemAtURL:src toURL:[NSURL fileURLWithPath:dest] error:&e]) {
+        [self showStatus:[NSString stringWithFormat:@"Lỗi: %@", e.localizedDescription] color:kRed];
+        return;
+    }
+    gLoadedFile = dest;
+    [self updateFileLbl];
+    [self showStatus:@"✓ Đã nạp file thành công" color:kGreen];
+}
+
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)c {
+    [self showStatus:@"Đã hủy chọn file" color:kTextDim];
+}
+
+// ===== LỌC =====
+- (void)applyFilter:(NSString*)q {
+    self.filtered = [NSMutableArray array];
+    self.filteredIdx = [NSMutableArray array];
+    NSString *lower = [q lowercaseString];
+    for (int i = 0; i < kBoneList.count; i++) {
+        NSString *n = kBoneList[i];
+        if (!lower.length || [[n lowercaseString] containsString:lower]) {
+            [self.filtered addObject:n];
+            [self.filteredIdx addObject:@(i)];
+        }
+    }
+    [self.boneTable reloadData];
+    // Cập nhật chiều cao table
+    CGFloat h = self.filtered.count * 62;
+    CGRect f = self.boneTable.frame;
+    f.size.height = h;
+    self.boneTable.frame = f;
+    self.mainScroll.contentSize = CGSizeMake(self.view.bounds.size.width, f.origin.y + h + 60);
+}
+
+// ===== TABLE =====
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s { return self.filtered.count; }
+- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
+    NSMODBoneRow *c = [tv dequeueReusableCellWithIdentifier:@"bone" forIndexPath:ip];
+    int realIdx = [self.filteredIdx[ip.row] intValue];
+    c.boneIdx = realIdx;
+    [c.editBtn removeTarget:nil action:nil forControlEvents:UIControlEventAllEvents];
+    [c.editBtn addTarget:self action:@selector(editBone:) forControlEvents:UIControlEventTouchUpInside];
+    return c;
+}
+
+- (void)editBone:(UIButton*)b {
+    // Tìm cell cha
+    UITableViewCell *cell = (UITableViewCell*)b.superview;
+    while (cell && ![cell isKindOfClass:[NSMODBoneRow class]]) cell = (UITableViewCell*)cell.superview;
+    if (!cell) return;
+    NSMODBoneRow *row = (NSMODBoneRow*)cell;
+    
+    NSMODBoneDetail *d = [[NSMODBoneDetail alloc] init];
+    d.boneIdx = row.boneIdx;
+    [self.navigationController pushViewController:d animated:YES];
+}
+
+- (void)searchBar:(UISearchBar *)sb textDidChange:(NSString *)t { [self applyFilter:t]; }
+- (void)searchBarSearchButtonClicked:(UISearchBar *)sb { [sb resignFirstResponder]; }
+
+// ===== HÀNH ĐỘNG =====
+- (void)toggleMaster:(UISwitch*)s {
+    gCfg[@"enable"] = @(s.isOn);
+    [self showStatus:s.isOn ? @"Đã BẬT" : @"Đã TẮT" color:kGreen];
+}
+- (void)globalChanged:(UISlider*)s {
+    gCfg[@"globalScale"] = @(s.value);
+    self.globalValLbl.text = [NSString stringWithFormat:@"%.2f", s.value];
+}
+- (void)saveConfig {
+    [gCfg writeToFile:kCfgPath atomically:YES];
+    [self showStatus:@"✓ Đã lưu cấu hình" color:kGreen];
+}
+- (void)showStatus:(NSString*)msg color:(UIColor*)c {
+    self.statusLbl.text = msg;
+    self.statusLbl.textColor = c;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        self.statusLbl.text = @"MADE BY NSMOD";
+        self.statusLbl.textColor = kTextDim;
+    });
+}
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self.boneTable reloadData];
+}
+- (void)dismiss { [self dismissViewControllerAnimated:YES completion:nil]; }
+@end
+
+// ===== NÚT MỞ =====
+@interface UIButton (NSMODJerry)
+@end
+@implementation UIButton (NSMODJerry)
+- (void)nsOpenJerry {
+    NSMODJerryVC *vc = [[NSMODJerryVC alloc] init];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    [UIApplication.sharedApplication.keyWindow.rootViewController
+        presentViewController:nav animated:YES completion:nil];
+}
+@end
+
+// ===== ENTRY =====
+__attribute__((constructor))
+static void NSMODJerryInit(void) {
+    if (!gCfg) gCfg = [NSMutableDictionary dictionaryWithContentsOfFile:kCfgPath] ?: [NSMutableDictionary dictionary];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        UIWindow *w = UIApplication.sharedApplication.keyWindow
+                   ?: UIApplication.sharedApplication.windows.firstObject;
+        if (!w) return;
+        UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+        btn.frame = CGRectMake(160, 60, 56, 56);
+        btn.layer.cornerRadius = 28;
+        btn.backgroundColor = kGreen;
+        btn.layer.shadowColor = kGreen.CGColor;
+        btn.layer.shadowRadius = 14;
+        btn.layer.shadowOpacity = 0.8;
+        btn.layer.shadowOffset = CGSizeZero;
+        [btn setTitle:@"🦴" forState:UIControlStateNormal];
+        btn.titleLabel.font = [UIFont systemFontOfSize:24];
+        [btn addTarget:btn action:@selector(nsOpenJerry) forControlEvents:UIControlEventTouchUpInside];
+        [w addSubview:btn];
+    });
+}
+╔══════════════════════════════════════════════════════════════╗
+║  CẤU TRÚC GIAO DIỆN (giống JerryMod)                         ║
+╠══════════════════════════════════════════════════════════════╣
+║                                                              ║
+║  ┌──────────────────────────────────────────────────┐        ║
+║  │ NSMOD                          ✓ LICENSED        │        ║
+║  │ ● Đã kích hoạt (VIP)                            │        ║
+║  └──────────────────────────────────────────────────┘        ║
+║                                                              ║
+║  ┌──────────────────────────────────────────────────┐        ║
+║  │ 📁 NẠP FILE CẤU HÌNH                             │        ║
+║  │  ┌──────────────────────────────────┐            │        ║
+║  │  │        📁 (folder icon)          │            │        ║
+║  │  │  Chọn file dữ liệu cần Make      │            │        ║
+║  │  │  HỆ THỐNG MAKE FILE TỰ ĐỘNG      │            │        ║
+║  │  └──────────────────────────────────┘            │        ║
+║  │  📄 assetindexer.U6Zffc4YI...qz58=3D             │        ║
+║  └──────────────────────────────────────────────────┘        ║
+║                                                              ║
+║  ┌──────────────────────────────────────────────────┐        ║
+║  │ ⚙️ CẤU HÌNH ĐỂ MAKE                       [ON]   │        ║
+║  │ GLOBAL SCALE (toàn thân)                  1.00   │        ║
+║  │ ━━━━━━━●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │        ║
+║  │ [💾 LƯU CẤU HÌNH]                                │        ║
+║  └──────────────────────────────────────────────────┘        ║
+║                                                              ║
+║  ┌──────────────────────────────────────────────────┐        ║
+║  │ 🔍 Tìm xương...                                  │        ║
+║  └──────────────────────────────────────────────────┘        ║
+║                                                              ║
+║  🦴 DANH SÁCH XƯƠNG                                          ║
+║  ┌──────────────────────────────────────────────────┐        ║
+║  │ bone_Root                              [CHỈNH]   │        ║
+║  │ S:1.00,1.00,1.00  O:0.0,0.0,0.0                 │        ║
+║  ├──────────────────────────────────────────────────┤        ║
+║  │ bone_Hips                              [CHỈNH]   │        ║
+║  │ S:1.00,1.00,1.00  O:0.0,0.0,0.0                 │        ║
+║  ├──────────────────────────────────────────────────┤        ║
+║  │ bone_Spine                             [CHỈNH]   │        ║
+║  │ S:1.00,1.00,1.00  O:0.0,0.0,0.0                 │        ║
+║  └──────────────────────────────────────────────────┘        ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════╗
+║  MÀN HÌNH CHI TIẾT XƯƠNG (khi bấm CHỈNH)                    ║
+╠══════════════════════════════════════════════════════════════╣
+║                                                              ║
+║  ┌──────────────────────────────────────────────────┐        ║
+║  │ 📏 SCALE XYZ                                     │        ║
+║  │  X  ━━━━━━━●━━━━━━━━━━━━━━━━━━━━━━━━━━  1.00    │        ║
+║  │  Y  ━━━━━━━●━━━━━━━━━━━━━━━━━━━━━━━━━━  1.00    │        ║
+║  │  Z  ━━━━━━━●━━━━━━━━━━━━━━━━━━━━━━━━━━  1.00    │        ║
+║  └──────────────────────────────────────────────────┘        ║
+║                                                              ║
+║  ┌──────────────────────────────────────────────────┐        ║
+║  │ ➡️ OFFSET XYZ                                    │        ║
+║  │  X  ━━━━━━━━━━━━●━━━━━━━━━━━━━━━━━━━━━  0.00    │        ║
+║  │  Y  ━━━━━━━━━━━━●━━━━━━━━━━━━━━━━━━━━━  0.00    │        ║
+║  │  Z  ━━━━━━━━━━━━●━━━━━━━━━━━━━━━━━━━━━  0.00    │        ║
+║  └──────────────────────────────────────────────────┘        ║
+║                                                              ║
+║  ┌──────────────────────────────────────────────────┐        ║
+║  │ 🔄 ROTATE XYZ (độ)                               │        ║
+║  │  X  ━━━━━━━━━━━━●━━━━━━━━━━━━━━━━━━━━━  0.00    │        ║
+║  │  Y  ━━━━━━━━━━━━●━━━━━━━━━━━━━━━━━━━━━  0.00    │        ║
+║  │  Z  ━━━━━━━━━━━━●━━━━━━━━━━━━━━━━━━━━━  0.00    │        ║
+║  └──────────────────────────────────────────────────┘        ║
+║                                                              ║
+║  ┌──────────────────────────────────────────────────┐        ║
+║  │ 🔀 HOÁN ĐỔI VỊ TRÍ VỚI XƯƠNG                     │        ║
+║  │  X  [⇄ bone_Head                    ]            │        ║
+║  │  Y  [▸ CHỌN XƯƠNG ĐỂ HOÁN ĐỔI       ]            │        ║
+║  │  Z  [▸ CHỌN XƯƠNG ĐỂ HOÁN ĐỔI       ]            │        ║
+║  └──────────────────────────────────────────────────┘        ║
+║                                                              ║
+║  [🔄 RESET XƯƠNG NÀY]                                        ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════╗
+║  TÍNH NĂNG CHÍNH                                             ║
+╠══════════════════════════════════════════════════════════════╣
+║                                                              ║
+║  1. NẠP FILE:                                                ║
+║     - Khung drop-zone viền xanh nét đứt                      ║
+║     - Icon folder + text hướng dẫn                            ║
+║     - Tap để mở UIDocumentPicker                             ║
+║     - Tự động lọc file assetindexer...                       ║
+║                                                              ║
+║  2. CẤU HÌNH:                                                ║
+║     - Switch tổng bật/tắt                                    ║
+║     - Slider global scale 0.3x - 3.0x                        ║
+║     - Nút lưu ghi vào plist                                  ║
+║                                                              ║
+║  3. DANH SÁCH XƯƠNG:                                         ║
+║     - 52 bone hiển thị dạng cell                             ║
+║     - Mỗi cell: tên + giá trị S/O + nút CHỈNH                ║
+║     - Thanh search lọc theo tên                              ║
+║                                                              ║
+║  4. CHI TIẾT XƯƠNG:                                          ║
+║     - 3 slider SCALE X/Y/Z (0.1 - 5.0)                       ║
+║     - 3 slider OFFSET X/Y/Z (-2.0 - 2.0)                     ║
+║     - 3 slider ROTATE X/Y/Z (-180 - 180 độ)                  ║
+║     - 3 nút HOÁN ĐỔI X/Y/Z sang xương khác                   ║
+║     - Nút reset xương này                                    ║
+║                                                              ║
+║  LƯU FILE: /var/mobile/Library/Preferences/com.nsmod.jerry.plist ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
